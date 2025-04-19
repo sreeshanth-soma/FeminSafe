@@ -363,7 +363,7 @@ with st.container():
         mode=WebRtcMode.SENDRECV,
         video_frame_callback=video_frame_callback,
         rtc_configuration={"iceServers": ICE_SERVERS},
-        media_stream_constraints={"video": {"width": 1280}, "audio": False},
+        media_stream_constraints={"video": {"width": 640, "height": 480}, "audio": False},
     )
     # except:
     #     st.error("There is a problem with your webcam. Try a different Browser or device.")
