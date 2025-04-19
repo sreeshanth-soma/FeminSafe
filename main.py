@@ -12,6 +12,8 @@ from skimage.transform import SimilarityTransform
 from types import SimpleNamespace
 from sklearn.metrics.pairwise import cosine_distances
 
+# Streamlit app configuration
+st.set_page_config(layout="wide", page_title="Live Webcam Face Recognition", page_icon=":sunglasses:")
 
 # ---------------------------------------------------------------------------------------------------------------------
 
@@ -40,9 +42,26 @@ class Match(SimpleNamespace):
 # Similarity threshold for face matching
 SIMILARITY_THRESHOLD = 1.0
 
-# Get twilio ice server configuration using twilio credentials from environment variables (set in streamlit secrets)
+# Get twilio ice server configuration using twilio credentials from environment variables
 # Ref: https://www.twilio.com/docs/stun-turn/api
-ICE_SERVERS = Client(os.environ["TWILIO_ACCOUNT_SID"], os.environ["TWILIO_AUTH_TOKEN"]).tokens.create().ice_servers
+account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
+auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
+
+if account_sid and auth_token:
+    try:
+        client = Client(account_sid, auth_token)
+        token = client.tokens.create()
+        ICE_SERVERS = token.ice_servers
+        st.success("Twilio ICE servers configured.")
+    except Exception as e:
+        st.warning(f"Could not get TURN server credentials from Twilio: {e}. Using default STUN servers.")
+        # Use default STUN servers if Twilio fails
+        ICE_SERVERS = [{"urls": ["stun:stun.l.google.com:19302"]}]
+else:
+    st.info("Twilio credentials not found in environment variables. Using default STUN servers.")
+    # Use default STUN servers if credentials are not set
+    ICE_SERVERS = [{"urls": ["stun:stun.l.google.com:19302"]}]
+
 
 # Init face detector and face recognizer
 FACE_RECOGNIZER = rt.InferenceSession("model.onnx", providers=rt.get_available_providers())
@@ -253,32 +272,48 @@ def draw_annotations(frame: np.ndarray, detections: List[Detection], matches: Li
 
 
 def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
-    # Convert frame to numpy array
-    frame = frame.to_ndarray(format="rgb24")
+    # Initialize session state variables if they don't exist
+    if "frame_count" not in st.session_state:
+        st.session_state.frame_count = 0
+    if "last_processed_frame" not in st.session_state:
+        st.session_state.last_processed_frame = None
 
-    # Run face detection
-    detections = detect_faces(frame)
+    st.session_state.frame_count += 1
+    FRAME_SKIP = 3
 
-    # Run face recognition
-    subjects = recognize_faces(frame, detections)
+    # Process frame only if it's a multiple of FRAME_SKIP or if we haven't processed any frame yet
+    if st.session_state.frame_count % FRAME_SKIP == 0 or st.session_state.last_processed_frame is None:
+        # Convert frame to numpy array
+        frame_np = frame.to_ndarray(format="rgb24")
 
-    # Run face matching
-    matches = match_faces(subjects, gallery)
+        # Run face detection
+        detections = detect_faces(frame_np)
 
-    # Draw annotations
-    frame = draw_annotations(frame, detections, matches)
+        # Run face recognition
+        subjects = recognize_faces(frame_np, detections)
 
-    # Convert frame back to av.VideoFrame
-    frame = av.VideoFrame.from_ndarray(frame, format="rgb24")
+        # Run face matching
+        matches = match_faces(subjects, gallery)
 
-    return frame
+        # Draw annotations
+        annotated_frame_np = draw_annotations(frame_np, detections, matches)
+
+        # Convert frame back to av.VideoFrame
+        processed_frame = av.VideoFrame.from_ndarray(annotated_frame_np, format="rgb24")
+
+        # Store the latest processed frame
+        st.session_state.last_processed_frame = processed_frame
+        return processed_frame
+    else:
+        # Return the last processed frame if skipping this one
+        return st.session_state.last_processed_frame
 
 
 # ---------------------------------------------------------------------------------------------------------------------
 
 # Streamlit app configuration
 # Set page layout for streamlit to wide
-st.set_page_config(layout="wide", page_title="Live Webcam Face Recognition", page_icon=":sunglasses:")
+# st.set_page_config(layout="wide", page_title="Live Webcam Face Recognition", page_icon=":sunglasses:") <-- REMOVED FROM HERE
 
 # Title
 st.title("Live Webcam Face Recognition")
